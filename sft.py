@@ -18,12 +18,38 @@ local_rank = int(os.environ.get("LOCAL_RANK", 0))
 
 def parse_args() -> SimpleNamespace:
     p = argparse.ArgumentParser(description="Train or evaluate Unsloth models")
+    # 数据和模型路径
     p.add_argument("--dataset_path", type=str, required=True, help="Path to dataset")
     p.add_argument("--model_name", type=str, required=True, help="Model name or path")
-    p.add_argument("--max_length", type=int, default=128, help="Maximum sequence length")
     p.add_argument("--output_dir", type=str, required=True, help="Path to output directory")
+
+    # 序列长度
+    p.add_argument("--max_length", type=int, default=128, help="Maximum sequence length")
+
+    # 训练超参数
+    p.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
+    p.add_argument("--batch_size", type=int, default=16, help="Per-device batch size")
+    p.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
+    p.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
+    p.add_argument("--warmup_steps", type=int, default=20, help="Warmup steps")
+
+    # LoRA 参数
+    p.add_argument("--lora_r", type=int, default=32, help="LoRA rank")
+    p.add_argument("--lora_alpha", type=int, default=64, help="LoRA alpha")
+    p.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
+    p.add_argument("--lora_target_modules", type=str, default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+                   help="Comma-separated list of target modules for LoRA")
+
+    # wandb 设置
+    p.add_argument("--wandb_project", type=str, default="protein", help="W&B project name")
+    p.add_argument("--wandb_entity", type=str, default=None, help="W&B entity (team/user)")
+    p.add_argument("--wandb_run_name", type=str, default="llama3_sft", help="W&B run name")
+    p.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
+
+    # 调试和评估
     p.add_argument("--DEBUG", action="store_true", help="Debug mode with smaller dataset")
     p.add_argument("--skip_eval", action="store_true", help="Skip evaluation after training")
+
     return p.parse_args(namespace=SimpleNamespace())
 
 
@@ -90,12 +116,25 @@ def train():
     args = parse_args()
     
     # wandb init (只在主进程初始化)
-    if local_rank == 0:
-        wandb.init(project="protein", 
-                    entity="diversity_dpo",
-                    name=f"llama3_sft",
-                    dir  = args.output_dir,
-                    settings=wandb.Settings(init_timeout=120))
+    if local_rank == 0 and not args.no_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,  # None 表示使用默认 entity
+            name=args.wandb_run_name,
+            dir=args.output_dir,
+            config={
+                "model": args.model_name,
+                "dataset": args.dataset_path,
+                "max_length": args.max_length,
+                "learning_rate": args.learning_rate,
+                "batch_size": args.batch_size,
+                "gradient_accumulation_steps": args.gradient_accumulation_steps,
+                "num_epochs": args.num_epochs,
+                "lora_r": args.lora_r,
+                "lora_alpha": args.lora_alpha,
+            },
+            settings=wandb.Settings(init_timeout=120)
+        )
     
     # add timestamp to output dir
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -115,15 +154,19 @@ def train():
                 tokenizer,
                 chat_template="llama-3",
             )
+    # 解析 LoRA target modules
+    target_modules = [m.strip() for m in args.lora_target_modules.split(",")]
+    log.info(f"LoRA target modules: {target_modules}")
+
     model = FastLanguageModel.get_peft_model(
         model,
-        r=32,  # LoRA rank
-        lora_alpha=64,
-        lora_dropout=0.05,
+        r=args.lora_r,
+        lora_alpha=args.lora_alpha,
+        lora_dropout=args.lora_dropout,
         bias="none",
-        use_gradient_checkpointing="unsloth", 
+        use_gradient_checkpointing="unsloth",
         use_rslora=True,
-        target_modules=["q_proj", "v_proj"],
+        target_modules=target_modules,
     )
     model.print_trainable_parameters()
     
@@ -143,14 +186,18 @@ def train():
     
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer)
     
+    # 计算有效 batch size
+    effective_batch_size = args.batch_size * args.gradient_accumulation_steps
+    log.info(f"Effective batch size: {effective_batch_size} (per_device={args.batch_size} x grad_accum={args.gradient_accumulation_steps})")
+
     # Training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        per_device_train_batch_size=16,  # 从32降到16，减少内存使用
-        gradient_accumulation_steps=4,  # 从2增加到4，保持有效batch size=64
-        warmup_steps=20,
-        num_train_epochs=2,
-        learning_rate=2e-4,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        warmup_steps=args.warmup_steps,
+        num_train_epochs=args.num_epochs,
+        learning_rate=args.learning_rate,
         fp16=True,
         logging_steps=50,
         optim="adamw_torch_fused",
@@ -164,6 +211,7 @@ def train():
         load_best_model_at_end=True,
         save_total_limit=2,
         max_grad_norm=1.0,
+        report_to=["wandb"] if (not args.no_wandb and local_rank == 0) else [],
         # DDP 相关参数
         ddp_find_unused_parameters=False,
         ddp_timeout=30 * 60,  # 30 分钟超时
@@ -238,7 +286,7 @@ def train():
     else:
         log.info("Skipping evaluation (--skip_eval flag set)")
     
-    if local_rank == 0:
+    if local_rank == 0 and not args.no_wandb:
         wandb.finish()
     return model, tokenizer
 

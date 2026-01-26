@@ -426,9 +426,9 @@ def main():
     logger.info(f"Prepared {len(samples)} samples with gold labels")
     
     # ----- load SFT model -----
-    logger.info(f"Loading model from {args.out_dir}...")
+    logger.info(f"Loading model from {args.model_name_or_path}...")
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=args.out_dir,
+        model_name=args.model_name_or_path,
         max_seq_length=args.max_seq_length,
         dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         load_in_4bit=False,
@@ -443,7 +443,7 @@ def main():
     if torch.cuda.is_available():
         model = model.to("cuda")
         logger.info("Model moved to CUDA device")
-    logger.info(f"Model loaded successfully from {args.out_dir}")
+    logger.info(f"Model loaded successfully from {args.model_name_or_path}")
     # ----- generate -----
     logger.info("="*60)
     logger.info("Starting prediction generation...")
@@ -569,16 +569,19 @@ def main():
         "split": args.split,
         "num_samples": len(samples),
         "metrics": {
-            "BLEU-2": float(bleu2.mean()),
-            "chrF": float(chrf.mean()),
-            "LEN_RATIO": float(len_ratio.mean()),
-            "COS_SIM": float(cos_sims.mean()),
+            "BLEU-2": {"mean": float(bleu2.mean()), "std": float(bleu2.std())},
+            "chrF": {"mean": float(chrf.mean()), "std": float(chrf.std())},
+            "LEN_RATIO": {"mean": float(len_ratio.mean()), "std": float(len_ratio.std())},
+            "COS_SIM": {"mean": float(cos_sims.mean()), "std": float(cos_sims.std())},
         },
         "config": {
             "model": args.model_name_or_path,
             "dataset": args.dataset_path,
             "level": args.level,
             "temperature": args.temperature,
+            "top_p": args.top_p,
+            "max_seq_length": args.max_seq_length,
+            "max_new_tokens": args.max_new_tokens,
             "ignore_comment": args.ignore_comment,
             "used_sacrebleu": HAS_SACREBLEU,
         }
@@ -593,11 +596,11 @@ def main():
     logger.info(f"Evaluation Results - {args.split} split")
     logger.info("="*60)
     logger.info(f"Samples: {len(samples)}")
-    logger.info("\nMetrics:")
-    logger.info(f"  BLEU-2:     {bleu2.mean():.4f}")
-    logger.info(f"  chrF:       {chrf.mean():.4f}")
-    logger.info(f"  Len Ratio:  {len_ratio.mean():.4f}")
-    logger.info(f"  CosSim:     {cos_sims.mean():.4f}")
+    logger.info("\nMetrics (mean ± std):")
+    logger.info(f"  BLEU-2:     {bleu2.mean():.4f} ± {bleu2.std():.4f}")
+    logger.info(f"  chrF:       {chrf.mean():.4f} ± {chrf.std():.4f}")
+    logger.info(f"  Len Ratio:  {len_ratio.mean():.4f} ± {len_ratio.std():.4f}")
+    logger.info(f"  CosSim:     {cos_sims.mean():.4f} ± {cos_sims.std():.4f}")
     logger.info(f"\nAll results saved to: {args.out_dir}")
     logger.info("="*60)
     logger.info("Evaluation completed successfully!")
