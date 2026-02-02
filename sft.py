@@ -180,16 +180,28 @@ def train():
     target_modules = [m.strip() for m in args.lora_target_modules.split(",")]
     log.info(f"LoRA target modules: {target_modules}")
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        use_rslora=True,
-        target_modules=target_modules,
-    )
+    if "unsloth" in args.model_name.lower():
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=64,  # LoRA rank
+            lora_alpha=128,
+            lora_dropout=0.05,
+            bias="none",
+            use_gradient_checkpointing="unsloth", 
+            use_rslora=True,
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        )
+    else:
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+            use_rslora=True,
+            target_modules=target_modules,
+        )
     model.print_trainable_parameters()
     
     # Load and prepare dataset
