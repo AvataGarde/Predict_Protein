@@ -90,7 +90,7 @@ def tokenize_for_metrics(s: str) -> List[str]:
     return s.split(" ")
 
 def strip_model_prefix(s: str) -> str:
-    """If your model outputs 'Protein Name: xxx', keep only xxx (first line)."""
+    """If your model outputs 'Protein Name: xxx', keep only xxx (first line). or Product_Description: xxx"""
     if s is None or s == "":
         return ""
     s = str(s).strip()
@@ -104,6 +104,11 @@ def strip_model_prefix(s: str) -> str:
     s = lines[0].strip()
     # common prefix patterns
     m = re.search(r"protein\s*name\s*:\s*(.*)$", s, flags=re.IGNORECASE)
+    
+    if m:
+        s = m.group(1).strip()
+
+    m = re.search(r"product[_\s]*description\s*:\s*(.*)$", s, flags=re.IGNORECASE)
     if m:
         s = m.group(1).strip()
     return normalize_text(s)
@@ -241,7 +246,7 @@ def chrf_score(ref: str, hyp: str, n: int = 6, beta: float = 2.0) -> float:
     f = (1 + beta2) * p_bar * r_bar / (beta2 * p_bar + r_bar + 1e-12)
     return float(f)
 
-def make_messages(sample: Dict, level: int, max_comment_len: int = 1000, ignore_comment: bool = False) -> List[Dict[str, str]]:
+def make_messages(sample: Dict, level: int, max_comment_len: int = 3500, ignore_comment: bool = False) -> List[Dict[str, str]]:
     """Create messages for inference, with comment truncation to avoid overly long inputs."""
     if level == 1:
         instruction = "Predict the protein name based on the UniProt ID."
@@ -249,26 +254,24 @@ def make_messages(sample: Dict, level: int, max_comment_len: int = 1000, ignore_
     elif level == 2:
         instruction = "Predict the protein name based on the UniProt ID and the organism."
         user = f"{instruction}\n\nUniProt ID: {sample['NAME']}\nOrganism: {sample.get('organism','')}"
-    else:
-        instruction = "Predict the protein name based on the UniProt ID, organism, and comments."
-        comment_text = sample.get("comment", "")
+    else: # level == 3 Gene Summary Dataset
+        GENE_ID = sample.get("Gene_ID", sample.get("NAME", ""))
+        user_prompt = sample.get("user_prompt", sample.get("comment", ""))
         
         # Force empty comment if ignore_comment is True
         if ignore_comment:
-            comment_text = ""
+            user_prompt = ""
         
-        if not comment_text:
-            comment_text = "No comment"
+        if not user_prompt:
+            user_prompt = "No summary available."
         else:
-            # Truncate overly long comments to avoid exceeding max_seq_length
-            if len(comment_text) > max_comment_len:
-                comment_text = comment_text[:max_comment_len] + "..."
-        user = (
-            f"{instruction}\n\n"
-            f"UniProt ID: {sample['NAME']}\n"
-            f"Organism: {sample.get('organism','')}\n"
-            f"Comment: {comment_text}"
-        )
+            # Truncate overly long summaries to avoid exceeding max_seq_length
+            if len(user_prompt) > max_comment_len:
+                user_prompt = user_prompt[:max_comment_len] + "..."
+        
+        instruction = "Based on the gene summary, predict the standardized protein product name."
+        user = f"{instruction}\n\nGene ID: {GENE_ID}\n\nSummary:\n{user_prompt}"
+        
     return [{"role": "user", "content": user}]
 
 
@@ -302,7 +305,7 @@ def parse_args() -> Args:
     p.add_argument("--level", default=1, type=int, choices=[1, 2, 3])
     p.add_argument("--split", default="test", type=str, choices=["train", "dev", "test"])
     p.add_argument("--max_seq_length", default=512, type=int)
-    p.add_argument("--max_new_tokens", default=64, type=int)
+    p.add_argument("--max_new_tokens", default=128, type=int)
     p.add_argument("--batch_size", default=32, type=int)
 
     p.add_argument("--embed_model", default="microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext", type=str)
@@ -415,7 +418,7 @@ def main():
     ds = load_from_disk(args.dataset_path)
     split_ds = ds[args.split]
     if args.debug:
-        split_ds = split_ds.select(range(min(100, len(split_ds))))
+        split_ds = split_ds.select(range(min(1000, len(split_ds))))
         logger.info("Debug mode: using a smaller subset of the dataset")
     logger.info(f"Loaded {len(split_ds)} samples from {args.split} split.")
     
@@ -462,14 +465,14 @@ def main():
     logger.info(f"Generated {len(preds)} predictions")
     
     # save raw predictions
-    pred_out_path = os.path.join(args.out_dir, f"predictions2_{args.split}.jsonl")
+    pred_out_path = os.path.join(args.out_dir, f"predictions_{args.split}.jsonl")
     logger.info(f"Saving predictions to {pred_out_path}...")
     with open(pred_out_path, "w") as f:
         for i in range(len(samples)):
             rec = {
-                "NAME": samples[i]["NAME"],
-                "PRODUCT_NAME": golds[i],
-                "PREDICTION": preds[i],
+                "Gene_ID": samples[i].get("Gene_ID", samples[i].get("NAME", "")),
+                "PMID": samples[i].get("PMID", ""),
+                "LLM_Product": preds[i] + ", putative Evidence_Code: ISS",
             }
             f.write(json.dumps(rec) + "\n")
     logger.info(f"Predictions saved to {pred_out_path}")
@@ -548,11 +551,12 @@ def main():
     # ----- save results -----
     logger.info("="*60)
     logger.info("Saving evaluation results...")
-    out_path = os.path.join(args.out_dir, f"evaluation2_{args.split}.jsonl")
+    out_path = os.path.join(args.out_dir, f"VEuPathDB_{args.split}.jsonl")
     with open(out_path, "w") as f:
         for i in range(len(samples)):
             rec = {
-                "NAME": samples[i]["NAME"],
+                "Gene_ID": samples[i].get("Gene_ID", samples[i].get("NAME", "")),
+                "PMID": samples[i].get("PMID", ""),
                 "PRODUCT_NAME": golds[i],
                 "PREDICTION": preds[i],
                 "BLEU-2": bleu2_list[i],
@@ -564,7 +568,7 @@ def main():
     logger.info(f"Detailed results saved to {out_path}")
     
     # summary
-    summary_path = os.path.join(args.out_dir, f"summary2_{args.split}.json")
+    summary_path = os.path.join(args.out_dir, f"summary_{args.split}.json")
     summary = {
         "split": args.split,
         "num_samples": len(samples),

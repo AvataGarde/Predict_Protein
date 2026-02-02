@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=level3_train
-#SBATCH --time=2-00:00:00
-#SBATCH -p gpu-h100
+#SBATCH --time=1-00:00:00
+#SBATCH -p gpu-a-lowsmall
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --mem=48G
 #SBATCH --output=/users/thz501/logs/bio/%x-%j.out
 #SBATCH --error=/users/thz501/logs/bio/%x-%j.err
 #SBATCH --chdir=/users/thz501
@@ -21,7 +21,7 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 torchrun --nproc_per_node=2 sft.py \
-    --dataset_path "/users/thz501/fastscratch/bio/dataset/protein_dataset_level3_full" \
+    --dataset_path "/users/thz501/fastscratch/bio/dataset/gene_summary_dataset" \
     --model_name "unsloth/Llama-3.1-8B-Instruct" \
-    --max_length 1024 \
+    --max_length 4096 \
     --output_dir "/users/thz501/fastscratch/bio/models" 

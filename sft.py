@@ -24,7 +24,7 @@ def parse_args() -> SimpleNamespace:
     p.add_argument("--output_dir", type=str, required=True, help="Path to output directory")
 
     # 序列长度
-    p.add_argument("--max_length", type=int, default=128, help="Maximum sequence length")
+    p.add_argument("--max_length", type=int, default=1024, help="Maximum sequence length")
 
     # 训练超参数
     p.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
@@ -34,8 +34,8 @@ def parse_args() -> SimpleNamespace:
     p.add_argument("--warmup_steps", type=int, default=20, help="Warmup steps")
 
     # LoRA 参数
-    p.add_argument("--lora_r", type=int, default=32, help="LoRA rank")
-    p.add_argument("--lora_alpha", type=int, default=64, help="LoRA alpha")
+    p.add_argument("--lora_r", type=int, default=64, help="LoRA rank")
+    p.add_argument("--lora_alpha", type=int, default=128, help="LoRA alpha")
     p.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
     p.add_argument("--lora_target_modules", type=str, default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
                    help="Comma-separated list of target modules for LoRA")
@@ -81,16 +81,38 @@ def format_instruction_level2(sample,tokenizer=None):
     return {"text": text, "instruction": instruction, "input": input_text, "output": output_text}
 
 
-# dataset3: NAME, organism, comment, PRODUCT_NAME
-def format_instruction_level3(sample,tokenizer=None):
-    instruction = "Predict the protein name based on the UniProt ID, organism, and comments."
-    comment_text = sample.get("comment", "No comment") if sample.get("comment") else "No comment"
-    input_text = f"UniProt ID: {sample['NAME']}\nOrganism: {sample['organism']}\nComment: {comment_text}"
+# dataset3: NAME, organism, comment, PRODUCT_NAME (UniProt Level3)
+def format_instruction_level3(sample, tokenizer=None):
+    instruction = "Based on the gene summary, predict the standardized protein product name."
+    comment_text = sample.get("comment", "") if sample.get("comment") else ""
+    if not comment_text:
+        comment_text = "No summary available."
+    input_text = f"Gene ID: {sample['NAME']}\n\nSummary:\n{comment_text}"
     output_text = sample["PRODUCT_NAME"]
     
     messages = [
         {"role": "user", "content": f"{instruction}\n\n{input_text}"},
-        {"role": "assistant", "content": f"Protein Name: {output_text}"}
+        {"role": "assistant", "content": f"Product_Description: {output_text}"}
+    ]
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    
+    return {"text": text, "instruction": instruction, "input": input_text, "output": output_text}
+
+
+# VEuPathDB Gene Summary Dataset: Gene_ID, user_prompt, PRODUCT_NAME
+def format_instruction_veupathdb(sample, tokenizer=None):
+    instruction = "Based on the gene summary, predict the standardized protein product name."
+    gene_id = sample["Gene_ID"]
+    user_prompt = sample["user_prompt"]
+    if not user_prompt:
+        user_prompt = "No summary available."
+    output_text = sample["PRODUCT_NAME"]
+    
+    input_text = f"Gene ID: {gene_id}\n\nSummary:\n{user_prompt}"
+    
+    messages = [
+        {"role": "user", "content": f"{instruction}\n\n{input_text}"},
+        {"role": "assistant", "content": f"Product_Description: {output_text}"}
     ]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
     
@@ -176,14 +198,22 @@ def train():
         format_function = lambda sample: format_instruction_level1(sample, tokenizer)
     elif "level2" in args.dataset_path:
         format_function = lambda sample: format_instruction_level2(sample, tokenizer)
+    elif "gene_summary" in args.dataset_path:
+        format_function = lambda sample: format_instruction_veupathdb(sample, tokenizer)
+    elif "level3" in args.dataset_path:
+        format_function = lambda sample: format_instruction_level3(sample, tokenizer)
     else:
+        # Default to level3 for unknown formats
         format_function = lambda sample: format_instruction_level3(sample, tokenizer)
     
+    log.info("Loading and preparing dataset...")
     dataset = prepare_data(args.dataset_path, format_function)
     if args.DEBUG:
-        dataset["train"] = dataset["train"].select(range(1000))
-        dataset["dev"] = dataset["dev"].select(range(200))
-    
+        train_size = min(20000, len(dataset["train"]))
+        dev_size = min(1000, len(dataset["dev"]))
+        dataset["train"] = dataset["train"].select(range(train_size))
+        dataset["dev"] = dataset["dev"].select(range(dev_size))
+    log.info("Dataset loaded and prepared.")
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer)
     
     # 计算有效 batch size
@@ -205,9 +235,9 @@ def train():
         lr_scheduler_type="cosine",
         seed=42,
         save_strategy="steps",
-        save_steps=50,
+        save_steps=100,
         eval_strategy="steps",
-        eval_steps=50,
+        eval_steps=100,
         load_best_model_at_end=True,
         save_total_limit=2,
         max_grad_norm=1.0,
@@ -256,6 +286,10 @@ def train():
             level = 1
         elif "level2" in args.dataset_path:
             level = 2
+        elif "gene_summary" in args.dataset_path:
+            level = 3  # VEuPathDB uses level 3 evaluation logic
+        elif "level3" in args.dataset_path:
+            level = 3
         else:
             level = 3
         
