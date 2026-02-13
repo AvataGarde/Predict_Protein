@@ -1,20 +1,3 @@
-"""
-Evaluation script for protein name generation models.
-
-Metrics:
-1. Sentence-level BLEU-2 (averaged across samples)
-   - Custom implementation with smoothing
-   - For better accuracy, install: pip install sacrebleu
-   
-2. chrF (Character n-gram F-score)
-   - Better for long texts with spelling variations
-   - More robust than BLEU for protein names
-   
-3. Semantic Similarity (Cosine Similarity)
-   - Uses PubMedBERT embeddings
-   - Model: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
-"""
-
 import os
 import re
 import json
@@ -246,7 +229,7 @@ def chrf_score(ref: str, hyp: str, n: int = 6, beta: float = 2.0) -> float:
     f = (1 + beta2) * p_bar * r_bar / (beta2 * p_bar + r_bar + 1e-12)
     return float(f)
 
-def make_messages(sample: Dict, level: int, max_comment_len: int = 3500, ignore_comment: bool = False) -> List[Dict[str, str]]:
+def make_messages(sample: Dict, level: int, max_comment_len: int = 3000, ignore_comment: bool = False) -> List[Dict[str, str]]:
     """Create messages for inference, with comment truncation to avoid overly long inputs."""
     if level == 1:
         instruction = "Predict the protein name based on the UniProt ID."
@@ -255,7 +238,6 @@ def make_messages(sample: Dict, level: int, max_comment_len: int = 3500, ignore_
         instruction = "Predict the protein name based on the UniProt ID and the organism."
         user = f"{instruction}\n\nUniProt ID: {sample['NAME']}\nOrganism: {sample.get('organism','')}"
     else: # level == 3 Gene Summary Dataset
-        GENE_ID = sample.get("Gene_ID", sample.get("NAME", ""))
         user_prompt = sample.get("user_prompt", sample.get("comment", ""))
         
         # Force empty comment if ignore_comment is True
@@ -270,7 +252,7 @@ def make_messages(sample: Dict, level: int, max_comment_len: int = 3500, ignore_
                 user_prompt = user_prompt[:max_comment_len] + "..."
         
         instruction = "Based on the gene summary, predict the standardized protein product name."
-        user = f"{instruction}\n\nGene ID: {GENE_ID}\n\nSummary:\n{user_prompt}"
+        user = f"{instruction}\n\nSummary:\n{user_prompt}"
         
     return [{"role": "user", "content": user}]
 

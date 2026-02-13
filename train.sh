@@ -21,7 +21,7 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 torchrun --nproc_per_node=2 sft.py \
-    --dataset_path "/users/thz501/fastscratch/bio/dataset/gene_summary_dataset" \
+    --dataset_path "/users/thz501/fastscratch/bio/dataset/protein_dataset_level3_full" \
     --model_name "unsloth/Llama-3.1-8B-Instruct" \
-    --max_length 4096 \
+    --max_length 2048 \
     --output_dir "/users/thz501/fastscratch/bio/models" 

@@ -28,7 +28,7 @@ def parse_args() -> SimpleNamespace:
 
     # 训练超参数
     p.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
-    p.add_argument("--batch_size", type=int, default=16, help="Per-device batch size")
+    p.add_argument("--batch_size", type=int, default=22, help="Per-device batch size")
     p.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
     p.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
     p.add_argument("--warmup_steps", type=int, default=20, help="Warmup steps")
@@ -87,7 +87,7 @@ def format_instruction_level3(sample, tokenizer=None):
     comment_text = sample.get("comment", "") if sample.get("comment") else ""
     if not comment_text:
         comment_text = "No summary available."
-    input_text = f"Gene ID: {sample['NAME']}\n\nSummary:\n{comment_text}"
+    input_text = f"Summary:\n{comment_text}"
     output_text = sample["PRODUCT_NAME"]
     
     messages = [
@@ -99,16 +99,15 @@ def format_instruction_level3(sample, tokenizer=None):
     return {"text": text, "instruction": instruction, "input": input_text, "output": output_text}
 
 
-# VEuPathDB Gene Summary Dataset: Gene_ID, user_prompt, PRODUCT_NAME
+# VEuPathDB Gene Summary Dataset: user_prompt, PRODUCT_NAME
 def format_instruction_veupathdb(sample, tokenizer=None):
     instruction = "Based on the gene summary, predict the standardized protein product name."
-    gene_id = sample["Gene_ID"]
     user_prompt = sample["user_prompt"]
     if not user_prompt:
         user_prompt = "No summary available."
     output_text = sample["PRODUCT_NAME"]
     
-    input_text = f"Gene ID: {gene_id}\n\nSummary:\n{user_prompt}"
+    input_text = f"Summary:\n{user_prompt}"
     
     messages = [
         {"role": "user", "content": f"{instruction}\n\n{input_text}"},
