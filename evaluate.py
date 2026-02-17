@@ -94,6 +94,10 @@ def strip_model_prefix(s: str) -> str:
     m = re.search(r"product[_\s]*description\s*:\s*(.*)$", s, flags=re.IGNORECASE)
     if m:
         s = m.group(1).strip()
+        
+    m = re.search(r"protein[_\s]*description\s*:\s*(.*)$", s, flags=re.IGNORECASE)
+    if m:
+        s = m.group(1).strip()
     return normalize_text(s)
 
 def embed_texts(
@@ -239,7 +243,7 @@ def make_messages(sample: Dict, level: int, max_comment_len: int = 3000, ignore_
         user = f"{instruction}\n\nUniProt ID: {sample['NAME']}\nOrganism: {sample.get('organism','')}"
     else: # level == 3 Gene Summary Dataset
         user_prompt = sample.get("user_prompt", sample.get("comment", ""))
-        
+        GENE_ID = sample.get("Gene_ID", sample.get("NAME", ""))
         # Force empty comment if ignore_comment is True
         if ignore_comment:
             user_prompt = ""
@@ -251,8 +255,8 @@ def make_messages(sample: Dict, level: int, max_comment_len: int = 3000, ignore_
             if len(user_prompt) > max_comment_len:
                 user_prompt = user_prompt[:max_comment_len] + "..."
         
-        instruction = "Based on the gene summary, predict the standardized protein product name."
-        user = f"{instruction}\n\nSummary:\n{user_prompt}"
+        instruction = "Predict the protein description based on the VEuPathDB ID and summary."
+        user = f"{instruction}\n\nVEuPathDB ID: {GENE_ID}\nSummary:\n{user_prompt}"
         
     return [{"role": "user", "content": user}]
 
@@ -334,7 +338,7 @@ def generate_predictions(
     """Generate predictions one sample at a time to avoid padding issues."""
     preds = []
     
-    # 生成参数设置
+    # Generation parameter settings
     gen_kwargs = {
         "max_new_tokens": max_new_tokens,
         "use_cache": True,
@@ -447,13 +451,14 @@ def main():
     logger.info(f"Generated {len(preds)} predictions")
     
     # save raw predictions
-    pred_out_path = os.path.join(args.out_dir, f"predictions_{args.split}.jsonl")
+    pred_out_path = os.path.join(args.out_dir, f"VEuPathDB_predictions_{args.split}.jsonl")
     logger.info(f"Saving predictions to {pred_out_path}...")
     with open(pred_out_path, "w") as f:
         for i in range(len(samples)):
             rec = {
                 "Gene_ID": samples[i].get("Gene_ID", samples[i].get("NAME", "")),
                 "PMID": samples[i].get("PMID", ""),
+                "Label": samples[i].get('PRODUCT_NAME',""),
                 "LLM_Product": preds[i] + ", putative Evidence_Code: ISS",
             }
             f.write(json.dumps(rec) + "\n")
@@ -533,7 +538,7 @@ def main():
     # ----- save results -----
     logger.info("="*60)
     logger.info("Saving evaluation results...")
-    out_path = os.path.join(args.out_dir, f"VEuPathDB_{args.split}.jsonl")
+    out_path = os.path.join(args.out_dir, f"VEuPathDB_evaluation_{args.split}.jsonl")
     with open(out_path, "w") as f:
         for i in range(len(samples)):
             rec = {
@@ -550,7 +555,7 @@ def main():
     logger.info(f"Detailed results saved to {out_path}")
     
     # summary
-    summary_path = os.path.join(args.out_dir, f"summary_{args.split}.json")
+    summary_path = os.path.join(args.out_dir, f"VEuPathDB_summary_{args.split}.json")
     summary = {
         "split": args.split,
         "num_samples": len(samples),

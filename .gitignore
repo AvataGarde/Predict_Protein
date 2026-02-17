@@ -1,2 +1,4 @@
 all_proteomes_merged.tsv
 bio.code-workspace
+unsloth_compiled_cache
+__pycache__

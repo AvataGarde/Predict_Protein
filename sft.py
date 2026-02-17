@@ -18,42 +18,42 @@ local_rank = int(os.environ.get("LOCAL_RANK", 0))
 
 def parse_args() -> SimpleNamespace:
     p = argparse.ArgumentParser(description="Train or evaluate Unsloth models")
-    # 数据和模型路径
+    # Data and model paths
     p.add_argument("--dataset_path", type=str, required=True, help="Path to dataset")
     p.add_argument("--model_name", type=str, required=True, help="Model name or path")
     p.add_argument("--output_dir", type=str, required=True, help="Path to output directory")
 
-    # 序列长度
+    # Sequence length
     p.add_argument("--max_length", type=int, default=1024, help="Maximum sequence length")
 
-    # 训练超参数
+    # Training hyperparameters
     p.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
     p.add_argument("--batch_size", type=int, default=22, help="Per-device batch size")
     p.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
     p.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
     p.add_argument("--warmup_steps", type=int, default=20, help="Warmup steps")
 
-    # LoRA 参数
+    # LoRA parameters
     p.add_argument("--lora_r", type=int, default=64, help="LoRA rank")
     p.add_argument("--lora_alpha", type=int, default=128, help="LoRA alpha")
     p.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
     p.add_argument("--lora_target_modules", type=str, default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
                    help="Comma-separated list of target modules for LoRA")
 
-    # wandb 设置
+    # wandb settings
     p.add_argument("--wandb_project", type=str, default="protein", help="W&B project name")
     p.add_argument("--wandb_entity", type=str, default=None, help="W&B entity (team/user)")
     p.add_argument("--wandb_run_name", type=str, default="llama3_sft", help="W&B run name")
     p.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
 
-    # 调试和评估
+    # Debugging and evaluation
     p.add_argument("--DEBUG", action="store_true", help="Debug mode with smaller dataset")
     p.add_argument("--skip_eval", action="store_true", help="Skip evaluation after training")
 
     return p.parse_args(namespace=SimpleNamespace())
 
 
-# dataset1: 只有 NAME 和 PRODUCT_NAME
+# dataset1: Only NAME and PRODUCT_NAME
 def format_instruction_level1(sample,tokenizer=None):
     instruction = "Predict the protein name based on the UniProt ID."
     input_text = sample["NAME"]
@@ -99,15 +99,15 @@ def format_instruction_level3(sample, tokenizer=None):
     return {"text": text, "instruction": instruction, "input": input_text, "output": output_text}
 
 
-# VEuPathDB Gene Summary Dataset: user_prompt, PRODUCT_NAME
+# VEuPathDB Gene Summary Dataset: Gene_ID, user_prompt, PRODUCT_NAME
 def format_instruction_veupathdb(sample, tokenizer=None):
-    instruction = "Based on the gene summary, predict the standardized protein product name."
+    instruction = "Predict the protein description based on the VEuPathDB ID and summary."
     user_prompt = sample["user_prompt"]
     if not user_prompt:
         user_prompt = "No summary available."
     output_text = sample["PRODUCT_NAME"]
     
-    input_text = f"Summary:\n{user_prompt}"
+    input_text = f"VEuPathDB ID: {sample['Gene_ID']}\nSummary:\n{user_prompt}"
     
     messages = [
         {"role": "user", "content": f"{instruction}\n\n{input_text}"},
@@ -121,7 +121,7 @@ def format_instruction_veupathdb(sample, tokenizer=None):
 
 def prepare_data(dataset_path, format_function):
     dataset = load_from_disk(dataset_path)
-    # 只在主进程上处理，避免多进程OOM
+    # Process only on the main process to avoid multi-process OOM
     dataset = dataset.map(format_function, remove_columns=dataset["train"].column_names, num_proc=1)
     return dataset
 
@@ -136,11 +136,11 @@ def train():
     
     args = parse_args()
     
-    # wandb init (只在主进程初始化)
+    # wandb init (Initialize only on the main process)
     if local_rank == 0 and not args.no_wandb:
         wandb.init(
             project=args.wandb_project,
-            entity=args.wandb_entity,  # None 表示使用默认 entity
+            entity=args.wandb_entity,  # None means use default entity
             name=args.wandb_run_name,
             dir=args.output_dir,
             config={
@@ -163,7 +163,7 @@ def train():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Load model and tokenizer
-    # 每个进程加载模型到自己的GPU
+    # Load model to each process's own GPU
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=args.model_name,
         max_seq_length=args.max_length,
@@ -175,7 +175,7 @@ def train():
                 tokenizer,
                 chat_template="llama-3",
             )
-    # 解析 LoRA target modules
+    # Parse LoRA target modules
     target_modules = [m.strip() for m in args.lora_target_modules.split(",")]
     log.info(f"LoRA target modules: {target_modules}")
 
@@ -227,7 +227,7 @@ def train():
     log.info("Dataset loaded and prepared.")
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer)
     
-    # 计算有效 batch size
+    # Calculate effective batch size
     effective_batch_size = args.batch_size * args.gradient_accumulation_steps
     log.info(f"Effective batch size: {effective_batch_size} (per_device={args.batch_size} x grad_accum={args.gradient_accumulation_steps})")
 
@@ -253,9 +253,9 @@ def train():
         save_total_limit=2,
         max_grad_norm=1.0,
         report_to=["wandb"] if (not args.no_wandb and local_rank == 0) else [],
-        # DDP 相关参数
+        # DDP related parameters
         ddp_find_unused_parameters=False,
-        ddp_timeout=30 * 60,  # 30 分钟超时
+        ddp_timeout=30 * 60,  # 30 minutes timeout
         local_rank=local_rank,
     )
     
@@ -268,7 +268,7 @@ def train():
         max_seq_length=args.max_length,
         data_collator=data_collator,
         args=training_args,
-        dataset_num_proc=1,  # 减少内存使用
+        dataset_num_proc=1,  # Reduce memory usage
         packing=False,  
     )
     
@@ -280,13 +280,13 @@ def train():
     
     trainer.train()
     
-    # Save the final model (只在主进程保存)
+    # Save the final model (Save only on the main process)
     if local_rank == 0:
         model.save_pretrained(args.output_dir)
         print("Training completed and model saved to", args.output_dir)
         tokenizer.save_pretrained(args.output_dir)
     
-    # Run evaluation after training (只在主进程执行)
+    # Run evaluation after training (Execute only on the main process)
     if not args.skip_eval and local_rank == 0:
         log.info("="*60)
         log.info("Starting post-training evaluation...")

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=level3_eval
 #SBATCH --time=1-00:00:00
-#SBATCH -p gpu-h100
+#SBATCH -p gpu-a-lowsmall
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -21,9 +21,9 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 python -u evaluate.py \
-    --dataset_path "/users/thz501/fastscratch/bio/dataset/gene_summary_dataset" \
-    --model_name_or_path "/users/thz501/fastscratch/bio/models/summary_raw" \
-    --out_dir "/users/thz501/fastscratch/bio/models/summary_raw"  \
+    --dataset_path "/users/thz501/fastscratch/bio/dataset/gene_summary_uniprot_style" \
+    --model_name_or_path "/users/thz501/fastscratch/bio/models/uniprot_trained" \
+    --out_dir "/users/thz501/fastscratch/bio/models/uniprot_trained"  \
     --max_seq_length 4096 \
     --level 3 
     
