@@ -1,0 +1,24 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "Gene_ID": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "PMID": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "user_prompt": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "PRODUCT_NAME": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
