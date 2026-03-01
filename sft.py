@@ -30,7 +30,7 @@ def parse_args() -> SimpleNamespace:
     p.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
     p.add_argument("--batch_size", type=int, default=22, help="Per-device batch size")
     p.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
-    p.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
+    p.add_argument("--num_epochs", type=int, default=4, help="Number of training epochs")
     p.add_argument("--warmup_steps", type=int, default=20, help="Warmup steps")
 
     # LoRA parameters
@@ -43,7 +43,7 @@ def parse_args() -> SimpleNamespace:
     # wandb settings
     p.add_argument("--wandb_project", type=str, default="protein", help="W&B project name")
     p.add_argument("--wandb_entity", type=str, default=None, help="W&B entity (team/user)")
-    p.add_argument("--wandb_run_name", type=str, default="llama3_sft", help="W&B run name")
+    p.add_argument("--wandb_run_name", type=str, default="sft_run", help="W&B run name")
     p.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
 
     # Debugging and evaluation
@@ -101,13 +101,13 @@ def format_instruction_level3(sample, tokenizer=None):
 
 # VEuPathDB Gene Summary Dataset: Gene_ID, user_prompt, PRODUCT_NAME
 def format_instruction_veupathdb(sample, tokenizer=None):
-    instruction = "Predict the protein description based on the VEuPathDB ID and summary."
+    instruction = "Based on the gene summary, predict the standardized protein product description."
     user_prompt = sample["user_prompt"]
     if not user_prompt:
         user_prompt = "No summary available."
     output_text = sample["PRODUCT_NAME"]
     
-    input_text = f"VEuPathDB ID: {sample['Gene_ID']}\nSummary:\n{user_prompt}"
+    input_text = f"Gene ID: {sample['Gene_ID']}\nSummary:\n{user_prompt}"
     
     messages = [
         {"role": "user", "content": f"{instruction}\n\n{input_text}"},
@@ -171,10 +171,18 @@ def train():
         load_in_4bit=False,
         device_map={'': local_rank},
     )
-    tokenizer = get_chat_template(
-                tokenizer,
-                chat_template="llama-3",
-            )
+
+    # change template based on model
+    if "llama-3" in args.model_name.lower():
+        tokenizer = get_chat_template(
+                    tokenizer,
+                    chat_template="llama-3",
+                )
+    elif "qwen" in args.model_name.lower():
+        tokenizer = get_chat_template(
+                    tokenizer,
+                    chat_template="qwen2.5",
+                )
     # Parse LoRA target modules
     target_modules = [m.strip() for m in args.lora_target_modules.split(",")]
     log.info(f"LoRA target modules: {target_modules}")
@@ -246,9 +254,9 @@ def train():
         lr_scheduler_type="cosine",
         seed=42,
         save_strategy="steps",
-        save_steps=100,
+        save_steps=15,
         eval_strategy="steps",
-        eval_steps=100,
+        eval_steps=15,
         load_best_model_at_end=True,
         save_total_limit=2,
         max_grad_norm=1.0,
@@ -272,10 +280,20 @@ def train():
         packing=False,  
     )
     
+    # Special tokens differ between LLaMA-3 and Qwen2.5 chat templates
+    if "llama-3" in args.model_name.lower():
+        instruction_part = "<|start_header_id|>user<|end_header_id|>\n\n"
+        response_part    = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+    elif "qwen" in args.model_name.lower():
+        instruction_part = "<|im_start|>user\n"
+        response_part    = "<|im_start|>assistant\n"
+    else:
+        raise ValueError(f"Unknown model family: {args.model_name}. Add its chat template tokens here.")
+
     trainer = train_on_responses_only(
         trainer,
-        instruction_part="<|start_header_id|>user<|end_header_id|>\n\n",
-        response_part="<|start_header_id|>assistant<|end_header_id|>\n\n",
+        instruction_part=instruction_part,
+        response_part=response_part,
     )
     
     trainer.train()

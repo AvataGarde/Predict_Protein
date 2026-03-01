@@ -21,9 +21,9 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 python -u evaluate.py \
-    --dataset_path "/users/thz501/fastscratch/bio/dataset/gene_summary_uniprot_style" \
-    --model_name_or_path "/users/thz501/fastscratch/bio/models/uniprot_trained" \
-    --out_dir "/users/thz501/fastscratch/bio/models/uniprot_trained"  \
+    --dataset_path "/users/thz501/fastscratch/bio/dataset/gene_summary_final_dataset" \
+    --model_name_or_path "/users/thz501/fastscratch/bio/models/run_20260228_191503" \
+    --out_dir "/users/thz501/fastscratch/bio/models/run_20260228_191503"  \
     --max_seq_length 4096 \
     --level 3 
     

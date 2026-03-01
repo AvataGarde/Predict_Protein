@@ -255,8 +255,8 @@ def make_messages(sample: Dict, level: int, max_comment_len: int = 3000, ignore_
             if len(user_prompt) > max_comment_len:
                 user_prompt = user_prompt[:max_comment_len] + "..."
         
-        instruction = "Predict the protein description based on the VEuPathDB ID and summary."
-        user = f"{instruction}\n\nVEuPathDB ID: {GENE_ID}\nSummary:\n{user_prompt}"
+        instruction = "Based on the gene summary, predict the standardized protein product description."
+        user = f"{instruction}\n\nGene ID: {GENE_ID}\nSummary:\n{user_prompt}"
         
     return [{"role": "user", "content": user}]
 
@@ -399,6 +399,14 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     logger.info(f"Output directory created/verified: {args.out_dir}")
     
+    # 自动生成输出文件前缀: {dataset_tag}__{model_tag}
+    # 例如 dataset_path=".../curator_score_dataset" model=".../summary_raw"
+    # => run_tag = "curator_score__summary_raw"
+    dataset_tag = os.path.basename(args.dataset_path.rstrip("/")).replace("_dataset", "")
+    model_tag = os.path.basename(args.model_name_or_path.rstrip("/"))
+    run_tag = f"{dataset_tag}__{model_tag}"
+    logger.info(f"  Run tag: {run_tag}")
+    
     # ----- load dataset -----
     logger.info(f"Loading dataset from {args.dataset_path}...")
     ds = load_from_disk(args.dataset_path)
@@ -451,7 +459,7 @@ def main():
     logger.info(f"Generated {len(preds)} predictions")
     
     # save raw predictions
-    pred_out_path = os.path.join(args.out_dir, f"VEuPathDB_predictions_{args.split}.jsonl")
+    pred_out_path = os.path.join(args.out_dir, f"{run_tag}_predictions_{args.split}.jsonl")
     logger.info(f"Saving predictions to {pred_out_path}...")
     with open(pred_out_path, "w") as f:
         for i in range(len(samples)):
@@ -459,7 +467,7 @@ def main():
                 "Gene_ID": samples[i].get("Gene_ID", samples[i].get("NAME", "")),
                 "PMID": samples[i].get("PMID", ""),
                 "Label": samples[i].get('PRODUCT_NAME',""),
-                "LLM_Product": preds[i] + ", putative Evidence_Code: ISS",
+                "LLM_Product": preds[i],
             }
             f.write(json.dumps(rec) + "\n")
     logger.info(f"Predictions saved to {pred_out_path}")
@@ -538,7 +546,7 @@ def main():
     # ----- save results -----
     logger.info("="*60)
     logger.info("Saving evaluation results...")
-    out_path = os.path.join(args.out_dir, f"VEuPathDB_evaluation_{args.split}.jsonl")
+    out_path = os.path.join(args.out_dir, f"{run_tag}_evaluation_{args.split}.jsonl")
     with open(out_path, "w") as f:
         for i in range(len(samples)):
             rec = {
@@ -555,7 +563,7 @@ def main():
     logger.info(f"Detailed results saved to {out_path}")
     
     # summary
-    summary_path = os.path.join(args.out_dir, f"VEuPathDB_summary_{args.split}.json")
+    summary_path = os.path.join(args.out_dir, f"{run_tag}_summary_{args.split}.json")
     summary = {
         "split": args.split,
         "num_samples": len(samples),

@@ -2,3 +2,7 @@ all_proteomes_merged.tsv
 bio.code-workspace
 unsloth_compiled_cache
 __pycache__
+rebuild_dataset.py
+curator_score.csv
+train.sh
+eval.sh
